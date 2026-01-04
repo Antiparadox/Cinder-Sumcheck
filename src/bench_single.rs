@@ -61,15 +61,22 @@ pub fn run_real_world_benchmark() {
     let r_x: Vec<Scalar> = (0..log_m).map(|_| Scalar::random(&mut rng)).collect();
     let r_y: Vec<Scalar> = (0..log_m).map(|_| Scalar::random(&mut rng)).collect();
     
-    // Prover phase - PARALLEL VERSION for s=20
-    println!("\n--- Prover Phase (Sumcheck - PARALLEL s=20) ---");
+    // Prover phase
+    let num_threads = rayon::current_num_threads();
+    println!("\n--- Prover Phase ---");
     println!("  Number of rounds: {}", setup.num_vars);
     println!("  Degree per round: {}", setup.degree());
-    println!("  RAYON_NUM_THREADS: {}", rayon::current_num_threads());
+    println!("  Threads (RAYON_NUM_THREADS): {}", num_threads);
     
     let start = Instant::now();
     let mut prover = CinderSumcheckProver::new(&setup, r_x.clone(), r_y.clone());
-    let proof = prover.prove_all_parallel(&mut rng);
+    let proof = if num_threads == 1 {
+        // Use single-threaded hardcoded version
+        prover.prove_all_hardcoded_20(&mut rng)
+    } else {
+        // Use parallel version
+        prover.prove_all_parallel(&mut rng)
+    };
     let prover_time = start.elapsed();
     
     println!("  Prover time: {:.2?}", prover_time);

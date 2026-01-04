@@ -1,8 +1,8 @@
 # Cinder Sumcheck Implementation
 
-Implementation of the core **sumcheck prover** for the [Cinder](https://alinush.github.io/cinder) sparse MLE compiler.
+Implementation of the core **sumcheck prover** for the [Cinder](https://alinush.github.io/cinder) sparse MLE compiler by Alin Tomescu.
 
-Cinder is a simple dense-to-sparse MLE compiler described by Alin Tomescu. It's suitable for circuits with `n ≤ 2²⁰` non-zero entries.
+Cinder is a simple dense-to-sparse MLE compiler, suitable for circuits with ≤ 2²⁰ non-zero entries.
 
 ---
 
@@ -12,24 +12,27 @@ We implement **only the sumcheck component** of Cinder — the most computationa
 
 ### The Sumcheck Statement
 
-Given a sparse matrix with `n` non-zero entries and random evaluation points `(r_x, r_y)`, we prove:
+Given a sparse matrix with `n` non-zero entries and random evaluation points `(rₓ, rᵧ)`, we prove:
 
 ```
-Ṽ(r_x, r_y) = Σ_{k ∈ [n]} val(k) · E_x(k) · E_y(k)
+Ṽ(rₓ, rᵧ) = Σ_{k ∈ [n]} val(k) · Eₓ(k) · Eᵧ(k)
 ```
 
-Where:
-- `val(k)` = value of k-th non-zero entry
-- `E_x(k) = eq_{r_x}(row_0(k), ..., row_{s-1}(k))` — equality polynomial over row bits
-- `E_y(k) = eq_{r_y}(col_0(k), ..., col_{s-1}(k))` — equality polynomial over col bits
-- `s = log(m)` where `m` is the matrix dimension
+Where (following [Cinder notation](https://alinush.github.io/cinder)):
+- `n` = number of non-zero entries in the sparse matrix
+- `m = 2ˢ` = matrix dimension  
+- `s = log(m)` = number of bits for row/column indices
+- `val(k)` = value of k-th non-zero entry (MLE over `log(n)` variables)
+- `rowₜ(k)`, `colₜ(k)` = t-th bit of row/column index for entry k
+- `Eₓ(k) = eq_{rₓ}(row₀(k), ..., rowₛ₋₁(k))` — equality polynomial over row bits
+- `Eᵧ(k) = eq_{rᵧ}(col₀(k), ..., colₛ₋₁(k))` — equality polynomial over col bits
 
 ### Why It's Expensive
 
-Each round of sumcheck requires computing a **degree-(2s+1)** univariate polynomial. Since `E_x` and `E_y` are each products of `s` linear terms, the polynomial:
+Each round of sumcheck requires computing a **degree-(2s+1)** univariate polynomial. Since `Eₓ` and `Eᵧ` are each products of `s` linear terms:
 
 ```
-h(X) = Σ_k val(k, X) · E_x(k, X) · E_y(k, X)
+h(X) = Σ_k val(k, X) · Eₓ(k, X) · Eᵧ(k, X)
 ```
 
 has degree `1 + s + s = 2s + 1` in each variable. For `s = 20`, this is degree **41**.
@@ -40,7 +43,7 @@ has degree `1 + s + s = 2s + 1` in each variable. For `s = 20`, this is degree *
 
 ### Per-Round Algorithm
 
-For each round of sumcheck over `log(n)` rounds:
+For each of the `log(n)` rounds:
 
 ```
 1. Initialize h_coeffs[0..42] = 0  (degree-42 polynomial coefficients)
@@ -50,20 +53,20 @@ For each round of sumcheck over `log(n)` rounds:
       → val(X) = val[2i] + (val[2i+1] - val[2i]) · X  (degree-1)
    
    b. For each bit t ∈ [s]:
-      - Look up row_t[2i], row_t[2i+1] 
-      - Compute linear factor: (1-r_x[t])·(1-row_t(X)) + r_x[t]·row_t(X)
+      - Look up rowₜ[2i], rowₜ[2i+1] 
+      - Compute linear factor: (1-rₓ[t])·(1-rowₜ(X)) + rₓ[t]·rowₜ(X)
    
-   c. Multiply all s linear factors → E_x(X), degree-s polynomial
+   c. Multiply all s linear factors → Eₓ(X), degree-s polynomial
    
-   d. Similarly compute E_y(X), degree-s polynomial
+   d. Similarly compute Eᵧ(X), degree-s polynomial
    
-   e. Multiply E_x(X) · E_y(X) → degree-2s polynomial (schoolbook O(s²))
+   e. Multiply Eₓ(X) · Eᵧ(X) → degree-2s polynomial (schoolbook O(s²))
    
    f. Multiply by val(X) → degree-(2s+1) polynomial
    
    g. Accumulate into h_coeffs
 
-3. Send h_coeffs to verifier (or hash for Fiat-Shamir)
+3. Send h(X) evaluations to verifier (or hash for Fiat-Shamir)
 
 4. Receive challenge r, fold all tables:
    table[i] = table[2i] · (1-r) + table[2i+1] · r
@@ -87,16 +90,16 @@ For each round of sumcheck over `log(n)` rounds:
 
 ## Benchmark Results
 
-**Test matrix**: `m = 1,040,083` rows, `nnz = 3,151,183` non-zero entries, `s = 20`
+**Hardware:** Apple M2 Max (12 cores), 32 GB RAM
 
-| Threads | Prover Time | Throughput |
-|---------|-------------|------------|
-| 1 | 26.0s | 121 K entries/s |
-| 2 | 13.5s | 233 K entries/s |
-| 4 | 7.0s | 450 K entries/s |
-| 8 | 4.4s | 716 K entries/s |
-| 12 | 3.5s | 900 K entries/s |
-| 16 | 3.1s | 1,016 K entries/s |
+**Test matrix:** `m = 2²⁰ = 1,048,576`, `n = 3,151,183` non-zero entries, `s = 20`
+
+| Threads | Prover Time | Throughput | Speedup |
+|---------|-------------|------------|---------|
+| 1 | 101.7s | 31 K entries/s | 1.0x |
+| 4 | 36.5s | 86 K entries/s | 2.8x |
+| 8 | 24.6s | 128 K entries/s | 4.1x |
+| 12 | 23.2s | 136 K entries/s | 4.4x |
 
 ---
 
@@ -112,15 +115,12 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 Single-threaded:
 ```bash
-cargo test bench_real_world --release -- --ignored --nocapture
+RAYON_NUM_THREADS=1 cargo test bench_real_world --release -- --ignored --nocapture
 ```
 
-Multi-threaded scaling:
+Multi-threaded (e.g., 8 threads):
 ```bash
-for t in 1 2 4 8 12 16; do
-  echo "=== Threads: $t ==="
-  RAYON_NUM_THREADS=$t cargo test bench_real_world --release -- --ignored --nocapture 2>&1 | grep -E "Prover time|Throughput"
-done
+RAYON_NUM_THREADS=8 cargo test bench_real_world --release -- --ignored --nocapture
 ```
 
 ### Run Unit Tests
